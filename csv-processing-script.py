@@ -12,7 +12,6 @@ def read_csv(filename):
         reader = csv.DictReader(f)
         data = []
         for row in reader:
-            # Xử lý BOM trong tên cột
             cleaned_row = {k.lstrip('\ufeff'): v for k, v in row.items()}
             data.append(cleaned_row)
         print(f"Số dòng đọc được từ {filename}: {len(data)}")
@@ -31,102 +30,125 @@ def get_first_column_name(data):
     return next(iter(data[0])) if data else None
 
 def generate_data(num_records):
-    # Đọc dữ liệu từ các file CSV trong thư mục master_data
     prices = read_csv('prices.csv')
     flags = read_csv('flags.csv')
     seats = read_csv('seats.csv')
     customers = read_csv('customers.csv')
 
-    # Kiểm tra dữ liệu seats
-    print("\nKiểm tra dữ liệu seats:")
-    if seats:
-        print(f"Số lượng bản ghi trong seats: {len(seats)}")
-        print(f"Các khóa trong bản ghi seats: {', '.join(seats[0].keys())}")
-        print(f"Giá trị 'floor' trong bản ghi đầu tiên: {seats[0].get('floor', 'Không có')}")
-    else:
-        print("Không có dữ liệu trong seats.")
+    for name, data in [('prices', prices), ('flags', flags), ('seats', seats), ('customers', customers)]:
+        print(f"\nKiểm tra dữ liệu {name}:")
+        if data:
+            print(f"Số lượng bản ghi trong {name}: {len(data)}")
+            print(f"Các khóa trong bản ghi {name}: {', '.join(data[0].keys())}")
+            print(f"Bản ghi đầu tiên của {name}: {data[0]}")
+        else:
+            print(f"Không có dữ liệu trong {name}.")
 
-    # Lấy tên cột đầu tiên của mỗi file
     price_type_key = get_first_column_name(prices)
     flag_key = get_first_column_name(flags)
     customer_key = get_first_column_name(customers)
 
-    # Tạo từ điển để lưu trữ dữ liệu kết hợp
-    combined_data = defaultdict(lambda: defaultdict(set))
+    # Tạo một tập hợp các ghế có sẵn
+    available_seats = set(tuple(seat.values()) for seat in seats)
 
-    # Kết hợp dữ liệu từ các file
-    for _ in range(num_records):
-        customer = random.choice(customers)[customer_key]
-        seat = random.choice(seats)
-        combined_data[customer]['seats'].add((
-            seat.get('floor', 'N/A'),
-            seat.get('area', 'N/A'),
-            seat.get('block', 'N/A'),
-            seat.get('row', 'N/A'),
-            seat.get('seat', 'N/A')
-        ))
-        combined_data[customer]['grade'].add(seat.get('grade', 'N/A'))
-        combined_data[customer]['flag'] = random.choice(flags)[flag_key]
-        combined_data[customer]['price_type'] = random.choice(prices)[price_type_key]
+    customer_data = defaultdict(lambda: {'flag': None, 'grade': None, 'records': []})
 
-    # Lọc ra các bản ghi hợp lệ và đồng nhất
-    valid_records = []
-    for customer, data in combined_data.items():
-        if len(data['seats']) > 0 and len(data['grade']) == 1:  # Kiểm tra có seat và grade đồng nhất
-            grade = data['grade'].pop()  # Lấy giá trị grade duy nhất
-            for seat in data['seats']:
-                record = {
-                    'customerNo': customer,
-                    'flag': data['flag'],
-                    'price_type': data['price_type'],
-                    'grade': grade,
-                    'floor': seat[0],
-                    'area': seat[1],
-                    'block': seat[2],
-                    'row': seat[3],
-                    'seat': seat[4]
-                }
-                valid_records.append(record)
+    total_records = 0
+    customers_list = customers.copy()
+
+    while total_records < num_records and customers_list:
+        customer = random.choice(customers_list)[customer_key]
+        
+        if customer_data[customer]['flag'] is None:
+            customer_data[customer]['flag'] = random.choice(flags)[flag_key]
+            customer_data[customer]['grade'] = random.choice(seats)['grade']
+
+        flag = customer_data[customer]['flag']
+        grade = customer_data[customer]['grade']
+        price_type = random.choice(prices)[price_type_key]
+        
+        if flag == '0' or not available_seats:
+            record = {
+                'customerNo': customer,
+                'flag': flag,
+                'price_type': price_type,
+                'grade': grade,
+                'seat_info': None
+            }
+        else:
+            seat = random.choice(list(available_seats))
+            available_seats.remove(seat)
+            record = {
+                'customerNo': customer,
+                'flag': flag,
+                'price_type': price_type,
+                'grade': grade,
+                'seat_info': seat[:-1]  # All elements except the last one (grade)
+            }
+        
+        customer_data[customer]['records'].append(record)
+        total_records += 1
+
+        if total_records >= num_records:
+            break
+
+        # Nếu đã xử lý tất cả khách hàng, reset danh sách để có thể lặp lại
+        if len(customer_data) == len(customers):
+            customers_list = customers.copy()
+
+    valid_records = [record for data in customer_data.values() for record in data['records']]
 
     # Sắp xếp records theo customerNo
-    valid_records.sort(key=lambda x: x['customerNo'])
+    valid_records.sort(key=lambda x: int(x['customerNo']) if x['customerNo'].isdigit() else x['customerNo'])
 
-    # In thông tin về dữ liệu đã tạo
+    # Chuyển đổi seat_info thành các cột riêng biệt
+    final_records = []
+    for record in valid_records:
+        final_record = {
+            'customerNo': record['customerNo'],
+            'flag': record['flag'],
+            'price_type': record['price_type'],
+            'grade': record['grade'],
+            'floor': record['seat_info'][0] if record['seat_info'] else '',
+            'area': record['seat_info'][1] if record['seat_info'] else '',
+            'block': record['seat_info'][2] if record['seat_info'] else '',
+            'row': record['seat_info'][3] if record['seat_info'] else '',
+            'seat': record['seat_info'][4] if record['seat_info'] else ''
+        }
+        final_records.append(final_record)
+
     print("\nThông tin về dữ liệu đã tạo:")
-    print(f"Số lượng bản ghi hợp lệ: {len(valid_records)}")
-    if valid_records:
-        print("Các khóa trong bản ghi đầu tiên:", ', '.join(valid_records[0].keys()))
-        print(f"Giá trị 'floor' trong bản ghi đầu tiên: {valid_records[0].get('floor', 'Không có')}")
+    print(f"Số lượng bản ghi hợp lệ: {len(final_records)}")
+    if final_records:
+        print("Các khóa trong bản ghi đầu tiên:", ', '.join(final_records[0].keys()))
+        for key, value in final_records[0].items():
+            print(f"Giá trị '{key}' trong bản ghi đầu tiên: {value}")
 
-    return valid_records
+    return final_records
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Generate combined CSV data.')
     parser.add_argument('num_records', type=int, help='Number of records to generate')
     args = parser.parse_args()
 
-    # Tạo dữ liệu
     generated_data = generate_data(args.num_records)
 
-    # Sắp xếp lại các cột theo yêu cầu
     fieldnames = ['customerNo', 'flag', 'price_type', 'grade', 'floor', 'area', 'block', 'row', 'seat']
 
-    # Tạo tên file với timestamp
     timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
     output_filename = f'combined_output_{timestamp}.csv'
 
-    # Ghi dữ liệu ra file CSV mới
     write_csv(output_filename, generated_data, fieldnames)
 
     print(f"\nĐã tạo file {output_filename} thành công với {len(generated_data)} bản ghi!")
 
-    # Kiểm tra nội dung file đầu ra
     print("\nKiểm tra nội dung file đầu ra:")
     with open(output_filename, 'r', encoding='utf-8-sig') as f:
         reader = csv.DictReader(f)
         first_row = next(reader, None)
         if first_row:
             print("Các cột trong file đầu ra:", ', '.join(first_row.keys()))
-            print(f"Giá trị 'floor' trong dòng đầu tiên: {first_row.get('floor', 'Không có')}")
+            for key, value in first_row.items():
+                print(f"Giá trị '{key}' trong dòng đầu tiên: {value}")
         else:
             print("File đầu ra trống.")
